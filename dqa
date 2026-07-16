@@ -1,0 +1,594 @@
+-- Tải thư viện Dương Quỳnh Anh (Rayfield đã đổi tên)
+local Rayfield = loadstring(game:HttpGet("https://raw.githubusercontent.com/dn-l24/D-ng-Qu-nh-Anh/refs/heads/main/D%C6%B0%C6%A1ng%20Qu%E1%BB%B3nh%20Anh"))()
+
+-- Vá loading screen để hiển thị Dương Quỳnh Anh ngay từ đầu
+local CoreGui = game:GetService("CoreGui")
+local RayfieldGui = CoreGui:FindFirstChild("Rayfield") or CoreGui:WaitForChild("Rayfield", 5)
+if RayfieldGui then
+    local LoadingFrame = RayfieldGui:FindFirstChild("Loading") or RayfieldGui.Main:FindFirstChild("LoadingFrame")
+    if LoadingFrame then
+        LoadingFrame.Title.Text = "Dương Quỳnh Anh"
+        LoadingFrame.Subtitle.Text = "Đang tải..."
+        LoadingFrame.Version.Text = "Dương Quỳnh Anh UI"
+        LoadingFrame.Banner.Image = "rbxassetid://125945223244416"
+    end
+end
+
+-- ==================== DỊCH VỤ VÀ BIẾN HỆ THỐNG ====================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Cấu hình
+local AimbotEnabled = true
+local ESPEnabled = true
+local BlueBackgroundEnabled = true
+local MenuVisible = true
+local FPSToggleState = false
+local FlyEnabled = false
+local FlySpeed = 50
+local SpinEnabled = false
+local NoclipEnabled = false
+local WalkSpeedEnabled = false
+local CustomWalkSpeed = 100
+local InfiniteJumpEnabled = false
+local KillAuraEnabled = false
+local ShowStatsPanel = false
+
+local OriginalToolData = {}
+local KillAuraConnection = nil
+local GIANT_SIZE = Vector3.new(2000, 2000, 2000)
+
+local FOV_RADIUS = 35
+local MAX_LINE_DISTANCE = 200
+local TARGET_PART = "Head"
+
+-- Màu sắc
+local FOVColor = Color3.fromRGB(173, 216, 230)
+local ESPColor = Color3.fromRGB(0, 162, 255)
+local TracerColor = Color3.fromRGB(255, 255, 0)
+local DefaultMenuColor = Color3.fromRGB(30, 30, 35)
+local BlueMenuColor = Color3.fromRGB(10, 40, 75)
+
+local ColorPresets = {
+    {Name = "Cyan", Color = Color3.fromRGB(0, 162, 255)},
+    {Name = "Red", Color = Color3.fromRGB(255, 0, 0)},
+    {Name = "Green", Color = Color3.fromRGB(0, 255, 0)},
+    {Name = "Yellow", Color = Color3.fromRGB(255, 255, 0)},
+    {Name = "Purple", Color = Color3.fromRGB(170, 0, 255)},
+    {Name = "White", Color = Color3.fromRGB(255, 255, 255)}
+}
+local currentFOVColorIndex = 1
+local currentESPColorIndex = 1
+local currentTracerColorIndex = 4
+
+-- ==================== DRAWING API ====================
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 1.5
+FOVCircle.Color = FOVColor
+FOVCircle.Filled = false
+FOVCircle.Radius = FOV_RADIUS
+FOVCircle.Visible = AimbotEnabled
+
+local TracerLines = {}
+for i = 1, 3 do
+    local line = Drawing.new("Line")
+    line.Thickness = 1.5
+    line.Color = TracerColor
+    line.Transparency = 1
+    line.Visible = false
+    table.insert(TracerLines, line)
+end
+
+local function updateAllTracerColors()
+    for _, line in ipairs(TracerLines) do
+        line.Color = TracerColor
+    end
+end
+
+-- ==================== ESP ====================
+local function applyESP(player)
+    if player == LocalPlayer or not player.Character then return end
+    local highlight = player.Character:FindFirstChild("ESPHighlight")
+    if not highlight then
+        highlight = Instance.new("Highlight")
+        highlight.Name = "ESPHighlight"
+        highlight.FillTransparency = 0.5
+        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = player.Character
+    end
+    highlight.FillColor = ESPColor
+    highlight.Enabled = ESPEnabled
+end
+
+local function removeESP(player)
+    if player.Character then
+        local highlight = player.Character:FindFirstChild("ESPHighlight")
+        if highlight then highlight:Destroy() end
+    end
+end
+
+local function updateAllESP()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if ESPEnabled then applyESP(player) else removeESP(player) end
+    end
+end
+
+-- ==================== FPS BOOSTER ====================
+local function IsImportant(instance)
+    local name = string.lower(instance.Name)
+    local protectedNames = {"baseplate", "spawnlocation", "floor", "ground", "sàn", "checkpoint", "teleport"}
+    for _, protected in ipairs(protectedNames) do
+        if string.find(name, protected) then return true end
+    end
+    return false
+end
+
+local function SmartOptimize(instance)
+    if instance:IsA("BasePart") or instance:IsA("MeshPart") then
+        instance.Material = Enum.Material.SmoothPlastic
+        instance.CastShadow = false
+        instance.Reflectance = 0
+        if instance:IsA("MeshPart") and not IsImportant(instance) then instance.TextureID = "" end
+    elseif instance:IsA("ParticleEmitter") or instance:IsA("Smoke") or instance:IsA("Fire") or instance:IsA("Sparkles") or instance:IsA("Trail") or instance:IsA("Beam") then
+        task.defer(function() if instance and instance.Parent then instance:Destroy() end end)
+    elseif instance:IsA("Decal") or instance:IsA("Texture") then
+        if instance.Parent and not IsImportant(instance.Parent) then
+            task.defer(function() if instance and instance.Parent then instance:Destroy() end end)
+        end
+    end
+end
+
+local function ExecuteSmartFPSBooster()
+    if _G.SmartFPSBoosterExecuted then return end
+    _G.SmartFPSBoosterExecuted = true
+
+    Lighting.GlobalShadows = false
+    Lighting.Brightness = 1
+    Lighting.ClockTime = 12
+    for _, effect in ipairs(Lighting:GetChildren()) do
+        if effect:IsA("BlurEffect") or effect:IsA("SunRaysEffect") or effect:IsA("BloomEffect") or effect:IsA("DepthOfFieldEffect") then
+            effect:Destroy()
+        end
+    end
+
+    task.spawn(function()
+        local count = 0
+        for _, descendant in ipairs(Workspace:GetDescendants()) do
+            if not descendant:IsDescendantOf(LocalPlayer.Character or workspace) then
+                SmartOptimize(descendant)
+                count = count + 1
+                if count >= 200 then
+                    count = 0
+                    RunService.Heartbeat:Wait()
+                end
+            end
+        end
+    end)
+
+    Workspace.DescendantAdded:Connect(function(descendant)
+        if LocalPlayer.Character and descendant:IsDescendantOf(LocalPlayer.Character) then return end
+        SmartOptimize(descendant)
+    end)
+end
+
+-- ==================== FLY, NOCLIP, JUMP, SPIN ====================
+local flyConnection, bodyVelocity, bodyGyro
+
+local function StartFly()
+    if flyConnection then flyConnection:Disconnect() end
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not rootPart or not humanoid then return end
+
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Name = "FlyVelocity"
+    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bodyVelocity.Parent = rootPart
+
+    bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.Name = "FlyGyro"
+    bodyGyro.CFrame = rootPart.CFrame
+    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bodyGyro.P = 9000
+    bodyGyro.Parent = rootPart
+    humanoid.PlatformStand = true
+
+    flyConnection = RunService.RenderStepped:Connect(function()
+        if not FlyEnabled or not rootPart or not character.Parent then
+            if flyConnection then flyConnection:Disconnect() flyConnection = nil end
+            return
+        end
+        bodyGyro.CFrame = Camera.CFrame
+        local walkDir = humanoid.MoveDirection
+
+        if walkDir.Magnitude > 0 then
+            local camFrame = Camera.CFrame
+            local flightVector = (camFrame.LookVector * walkDir:Dot(Vector3.new(camFrame.LookVector.X, 0, camFrame.LookVector.Z).Unit) + camFrame.RightVector * walkDir:Dot(Vector3.new(camFrame.RightVector.X, 0, camFrame.RightVector.Z).Unit))
+            bodyVelocity.Velocity = flightVector.Magnitude > 0 and (flightVector.Unit * FlySpeed) or Vector3.new(0, 0, 0)
+        else
+            bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+        end
+    end)
+end
+
+local function StopFly()
+    if flyConnection then flyConnection:Disconnect() flyConnection = nil end
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+    if rootPart then
+        local fV = rootPart:FindFirstChild("FlyVelocity")
+        local fG = rootPart:FindFirstChild("FlyGyro")
+        if fV then fV:Destroy() end
+        if fG then fG:Destroy() end
+    end
+    if humanoid then humanoid.PlatformStand = false end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if FlyEnabled then
+        task.wait(1)
+        StartFly()
+    end
+end)
+
+RunService.Stepped:Connect(function()
+    if NoclipEnabled and LocalPlayer.Character then
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
+    end
+end)
+
+UserInputService.JumpRequest:Connect(function()
+    if InfiniteJumpEnabled and LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+task.spawn(function()
+    RunService.Heartbeat:Connect(function()
+        if SpinEnabled and not FlyEnabled then
+            local character = LocalPlayer.Character
+            local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+            if rootPart then rootPart.CFrame = rootPart.CFrame * CFrame.Angles(0, math.rad(25), 0) end
+        end
+    end)
+end)
+
+-- ==================== KILL AURA ====================
+local function resetSwordSize(tool)
+    if tool and tool:FindFirstChild("Handle") and OriginalToolData[tool] then
+        local handle = tool.Handle
+        handle.Size = OriginalToolData[tool].Size
+        tool.Grip = OriginalToolData[tool].Grip
+        handle.Massless = false
+        handle.CanCollide = true
+        OriginalToolData[tool] = nil
+    end
+end
+
+local function stopKillAuraLogic()
+    if KillAuraConnection then KillAuraConnection:Disconnect() KillAuraConnection = nil end
+    for tool, _ in pairs(OriginalToolData) do resetSwordSize(tool) end
+    OriginalToolData = {}
+end
+
+local function startKillAuraLogic()
+    if KillAuraConnection then return end
+    KillAuraConnection = RunService.Heartbeat:Connect(function()
+        if not KillAuraEnabled then return end
+        local char = LocalPlayer.Character
+        if not char then return end
+
+        local equippedTool = char:FindFirstChildOfClass("Tool")
+        if equippedTool and equippedTool:FindFirstChild("Handle") then
+            local handle = equippedTool.Handle
+            if not OriginalToolData[equippedTool] then
+                OriginalToolData[equippedTool] = { Size = handle.Size, Grip = equippedTool.Grip }
+            end
+
+            handle.Size = GIANT_SIZE
+            handle.Massless = true
+            handle.CanCollide = false
+            equippedTool.Grip = CFrame.new(0, 0, -(GIANT_SIZE.Z / 2) - 10)
+            equippedTool:Activate()
+
+            if firetouchinterest then
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                        firetouchinterest(handle, player.Character.HumanoidRootPart, 0)
+                        firetouchinterest(handle, player.Character.HumanoidRootPart, 1)
+                    end
+                end
+            end
+        end
+
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        if backpack then
+            for _, item in ipairs(backpack:GetChildren()) do
+                if item:IsA("Tool") and OriginalToolData[item] then resetSwordSize(item) end
+            end
+        end
+    end)
+end
+
+-- ==================== RAYCAST ====================
+local RaycastCache = RaycastParams.new()
+RaycastCache.FilterType = Enum.RaycastFilterType.Exclude
+
+local function isVisible(targetCharacter, targetPart)
+    if not LocalPlayer.Character or not targetCharacter then return false end
+    RaycastCache.FilterDescendantsInstances = {LocalPlayer.Character, targetCharacter, Camera}
+    local origin = Camera.CFrame.Position
+    local direction = targetPart.Position - origin
+    return workspace:Raycast(origin, direction, RaycastCache) == nil
+end
+
+-- ==================== GIAO DIỆN CHÍNH (RAYFIELD) ====================
+local Window = Rayfield:CreateWindow({
+    Name = "Dương Quỳnh Anh",
+    LoadingTitle = "Dương Quỳnh Anh",
+    LoadingSubtitle = "Aimbot & More",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "DuongQuynhAnhConfig",
+        FileName = "Settings"
+    },
+    Discord = { Enabled = false },
+    KeySystem = false
+})
+
+-- Tabs
+local CombatTab = Window:CreateTab("Chiến đấu", 4483362458)
+local MovementTab = Window:CreateTab("Di chuyển", 4483362458)
+local VisualTab = Window:CreateTab("Hiển thị", 4483362458)
+local SettingsTab = Window:CreateTab("Cài đặt", 4483362458)
+
+-- ==================== TAB CHIẾN ĐẤU ====================
+CombatTab:CreateSection("Aimbot & Kill Aura")
+CombatTab:CreateToggle({
+    Name = "Aimbot",
+    CurrentValue = AimbotEnabled,
+    Flag = "Aimbot",
+    Callback = function(v) AimbotEnabled = v end
+})
+CombatTab:CreateToggle({
+    Name = "Kill Aura",
+    CurrentValue = false,
+    Flag = "KillAura",
+    Callback = function(v)
+        KillAuraEnabled = v
+        if v then startKillAuraLogic() else stopKillAuraLogic() end
+    end
+})
+
+-- ==================== TAB DI CHUYỂN ====================
+MovementTab:CreateSection("Bay & Tốc độ")
+MovementTab:CreateToggle({
+    Name = "Bay (Fly)",
+    CurrentValue = FlyEnabled,
+    Flag = "Fly",
+    Callback = function(v)
+        FlyEnabled = v
+        if v then StartFly() else StopFly() end
+    end
+})
+MovementTab:CreateButton({
+    Name = "Tốc độ bay: 50",
+    Callback = function()
+        FlySpeed = (FlySpeed >= 250) and 50 or (FlySpeed + 50)
+        -- Cập nhật text nút (Rayfield không hỗ trợ Set trực tiếp, ta dùng lại biến)
+    end
+})
+MovementTab:CreateToggle({
+    Name = "Đi xuyên tường",
+    CurrentValue = NoclipEnabled,
+    Flag = "Noclip",
+    Callback = function(v) NoclipEnabled = v end
+})
+MovementTab:CreateToggle({
+    Name = "Tăng tốc chạy",
+    CurrentValue = WalkSpeedEnabled,
+    Flag = "WalkSpeed",
+    Callback = function(v)
+        WalkSpeedEnabled = v
+        if not v and LocalPlayer.Character then
+            local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then humanoid.WalkSpeed = 16 end
+        end
+    end
+})
+MovementTab:CreateToggle({
+    Name = "Nhảy vô hạn",
+    CurrentValue = InfiniteJumpEnabled,
+    Flag = "InfJump",
+    Callback = function(v) InfiniteJumpEnabled = v end
+})
+MovementTab:CreateToggle({
+    Name = "Tự quay (Spin)",
+    CurrentValue = SpinEnabled,
+    Flag = "Spin",
+    Callback = function(v) SpinEnabled = v end
+})
+
+-- ==================== TAB HIỂN THỊ ====================
+VisualTab:CreateSection("ESP & Tracers")
+VisualTab:CreateToggle({
+    Name = "ESP Xuyên tường",
+    CurrentValue = ESPEnabled,
+    Flag = "ESP",
+    Callback = function(v)
+        ESPEnabled = v
+        updateAllESP()
+    end
+})
+VisualTab:CreateButton({
+    Name = "Màu ESP: Cyan",
+    Callback = function()
+        currentESPColorIndex = (currentESPColorIndex % #ColorPresets) + 1
+        ESPColor = ColorPresets[currentESPColorIndex].Color
+        if ESPEnabled then updateAllESP() end
+    end
+})
+VisualTab:CreateButton({
+    Name = "Màu đường kẻ: Yellow",
+    Callback = function()
+        currentTracerColorIndex = (currentTracerColorIndex % #ColorPresets) + 1
+        TracerColor = ColorPresets[currentTracerColorIndex].Color
+        updateAllTracerColors()
+    end
+})
+VisualTab:CreateSection("FOV & Radar")
+VisualTab:CreateSlider({
+    Name = "Bán kính FOV",
+    Range = {10, 300},
+    Increment = 10,
+    Suffix = "studs",
+    CurrentValue = FOV_RADIUS,
+    Flag = "FOVRadius",
+    Callback = function(v) FOV_RADIUS = v end
+})
+VisualTab:CreateButton({
+    Name = "Màu vòng FOV: Cyan",
+    Callback = function()
+        currentFOVColorIndex = (currentFOVColorIndex % #ColorPresets) + 1
+        FOVColor = ColorPresets[currentFOVColorIndex].Color
+    end
+})
+
+-- ==================== TAB CÀI ĐẶT ====================
+SettingsTab:CreateSection("Giao diện & Hệ thống")
+SettingsTab:CreateToggle({
+    Name = "Tăng FPS (dọn map)",
+    CurrentValue = FPSToggleState,
+    Flag = "FPSBoost",
+    Callback = function(v)
+        FPSToggleState = v
+        if v then ExecuteSmartFPSBooster() end
+    end
+})
+SettingsTab:CreateToggle({
+    Name = "Hiển thị FPS/Ping",
+    CurrentValue = ShowStatsPanel,
+    Flag = "StatsPanel",
+    Callback = function(v) ShowStatsPanel = v end
+})
+SettingsTab:CreateToggle({
+    Name = "Nền menu xanh mờ",
+    CurrentValue = BlueBackgroundEnabled,
+    Flag = "BlueBg",
+    Callback = function(v) BlueBackgroundEnabled = v end
+})
+
+-- ==================== VÒNG LẶP CHÍNH ====================
+RunService.RenderStepped:Connect(function()
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    FOVCircle.Position = screenCenter
+    FOVCircle.Radius = FOV_RADIUS
+    FOVCircle.Color = FOVColor
+    FOVCircle.Visible = AimbotEnabled
+
+    local localCharacter = LocalPlayer.Character
+    local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+
+    local closestAimbotPlayer = nil
+    local shortestDistance = math.huge
+    local tracerCandidates = {}
+
+    if AimbotEnabled or ESPEnabled then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == LocalPlayer or not player.Character then continue end
+            local char = player.Character
+            local targetPart = char:FindFirstChild(TARGET_PART)
+            local root = char:FindFirstChild("HumanoidRootPart")
+            local hum = char:FindFirstChildOfClass("Humanoid")
+
+            if hum and hum.Health > 0 and targetPart and root and char.Parent == Workspace then
+                if AimbotEnabled then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                    if onScreen then
+                        local distanceToCenter = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                        if distanceToCenter <= FOV_RADIUS and distanceToCenter < shortestDistance and isVisible(char, targetPart) then
+                            closestAimbotPlayer = player
+                            shortestDistance = distanceToCenter
+                        end
+                    end
+                end
+
+                if ESPEnabled and localRoot then
+                    local distance = (root.Position - localRoot.Position).Magnitude
+                    if distance <= MAX_LINE_DISTANCE then
+                        table.insert(tracerCandidates, {Player = player, Distance = distance, TargetPart = targetPart})
+                    end
+                end
+            end
+        end
+    end
+
+    if AimbotEnabled and closestAimbotPlayer then
+        local targetPos = closestAimbotPlayer.Character[TARGET_PART].Position
+        Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, targetPos)
+    end
+
+    if ESPEnabled then
+        if #tracerCandidates > 1 then
+            table.sort(tracerCandidates, function(a, b) return a.Distance < b.Distance end)
+        end
+        for i = 1, 3 do
+            local line = TracerLines[i]
+            local candidate = tracerCandidates[i]
+            if candidate then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(candidate.TargetPart.Position)
+                if onScreen then
+                    line.From = screenCenter
+                    line.To = Vector2.new(screenPos.X, screenPos.Y)
+                    line.Visible = true
+                else
+                    line.Visible = false
+                end
+            else
+                line.Visible = false
+            end
+        end
+    else
+        for i = 1, 3 do TracerLines[i].Visible = false end
+    end
+
+    if WalkSpeedEnabled and localCharacter then
+        local humanoid = localCharacter:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid.WalkSpeed = CustomWalkSpeed end
+    end
+end)
+
+-- ==================== KẾT NỐI NGƯỜI CHƠI (ESP) ====================
+local function setupPlayerConnections(player)
+    player.CharacterAdded:Connect(function(character)
+        task.wait(0.5)
+        if ESPEnabled then applyESP(player) end
+    end)
+    if player.Character and ESPEnabled then applyESP(player) end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    setupPlayerConnections(player)
+end
+Players.PlayerAdded:Connect(setupPlayerConnections)
+Players.PlayerRemoving:Connect(removeESP)
+
+-- ==================== KHỞI ĐỘNG CẤU HÌNH ====================
+Rayfield:LoadConfiguration()
+
+print("Dương Quỳnh Anh - Full Hub đã sẵn sàng!")
