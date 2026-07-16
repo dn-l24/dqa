@@ -26,7 +26,6 @@ local Camera = workspace.CurrentCamera
 -- Cấu hình
 local AimbotEnabled = true
 local ESPEnabled = true
-local BlueBackgroundEnabled = true
 local MenuVisible = true
 local FPSToggleState = false
 local FlyEnabled = false
@@ -51,8 +50,6 @@ local TARGET_PART = "Head"
 local FOVColor = Color3.fromRGB(173, 216, 230)
 local ESPColor = Color3.fromRGB(0, 162, 255)
 local TracerColor = Color3.fromRGB(255, 255, 0)
-local DefaultMenuColor = Color3.fromRGB(30, 30, 35)
-local BlueMenuColor = Color3.fromRGB(10, 40, 75)
 
 local ColorPresets = {
     {Name = "Cyan", Color = Color3.fromRGB(0, 162, 255)},
@@ -120,7 +117,8 @@ local function updateAllESP()
     end
 end
 
--- ==================== FPS BOOSTER ====================
+-- ==================== FPS BOOSTER NÂNG CẤP ====================
+-- Bộ lọc các đối tượng quan trọng không nên bị xóa
 local function IsImportant(instance)
     local name = string.lower(instance.Name)
     local protectedNames = {"baseplate", "spawnlocation", "floor", "ground", "sàn", "checkpoint", "teleport"}
@@ -130,25 +128,28 @@ local function IsImportant(instance)
     return false
 end
 
+-- Tối ưu hóa vật liệu và thuộc tính của Part để giảm tải GPU
 local function SmartOptimize(instance)
     if instance:IsA("BasePart") or instance:IsA("MeshPart") then
+        -- Giảm chất lượng vật liệu và tắt bóng đổ
         instance.Material = Enum.Material.SmoothPlastic
         instance.CastShadow = false
         instance.Reflectance = 0
-        if instance:IsA("MeshPart") and not IsImportant(instance) then instance.TextureID = "" end
+        if instance:IsA("MeshPart") and not IsImportant(instance) then
+            instance.TextureID = "" -- Xóa texture không cần thiết
+        end
     elseif instance:IsA("ParticleEmitter") or instance:IsA("Smoke") or instance:IsA("Fire") or instance:IsA("Sparkles") or instance:IsA("Trail") or instance:IsA("Beam") then
-        task.defer(function() if instance and instance.Parent then instance:Destroy() end end)
+        -- Xóa hiệu ứng hạt để giảm CPU
+        instance:Destroy()
     elseif instance:IsA("Decal") or instance:IsA("Texture") then
         if instance.Parent and not IsImportant(instance.Parent) then
-            task.defer(function() if instance and instance.Parent then instance:Destroy() end end)
+            instance:Destroy()
         end
     end
 end
 
-local function ExecuteSmartFPSBooster()
-    if _G.SmartFPSBoosterExecuted then return end
-    _G.SmartFPSBoosterExecuted = true
-
+-- Chế độ đồ họa thấp: tắt các hiệu ứng ánh sáng nặng
+local function EnableLowGraphics()
     Lighting.GlobalShadows = false
     Lighting.Brightness = 1
     Lighting.ClockTime = 12
@@ -157,25 +158,42 @@ local function ExecuteSmartFPSBooster()
             effect:Destroy()
         end
     end
+end
 
-    task.spawn(function()
-        local count = 0
-        for _, descendant in ipairs(Workspace:GetDescendants()) do
+-- Quét và tối ưu map theo từng phần, tránh giật lag khi khởi tạo
+local function ExecuteSmartFPSBooster()
+    if _G.SmartFPSBoosterExecuted then return end
+    _G.SmartFPSBoosterExecuted = true
+
+    EnableLowGraphics()
+
+    -- Tối ưu dần các đối tượng hiện có, mỗi lần xử lý một phần để không gây đứng hình
+    local descendants = Workspace:GetDescendants()
+    local index = 1
+    local batchSize = 100
+
+    local function processBatch()
+        for _ = 1, batchSize do
+            if index > #descendants then
+                -- Đã xong, tiếp tục lắng nghe đối tượng mới
+                Workspace.DescendantAdded:Connect(function(descendant)
+                    if LocalPlayer.Character and descendant:IsDescendantOf(LocalPlayer.Character) then return end
+                    SmartOptimize(descendant)
+                end)
+                return
+            end
+            local descendant = descendants[index]
             if not descendant:IsDescendantOf(LocalPlayer.Character or workspace) then
                 SmartOptimize(descendant)
-                count = count + 1
-                if count >= 200 then
-                    count = 0
-                    RunService.Heartbeat:Wait()
-                end
             end
+            index = index + 1
         end
-    end)
+        -- Tiếp tục xử lý batch tiếp theo vào frame sau
+        RunService.Heartbeat:Wait()
+        processBatch()
+    end
 
-    Workspace.DescendantAdded:Connect(function(descendant)
-        if LocalPlayer.Character and descendant:IsDescendantOf(LocalPlayer.Character) then return end
-        SmartOptimize(descendant)
-    end)
+    task.spawn(processBatch)
 end
 
 -- ==================== FLY, NOCLIP, JUMP, SPIN ====================
@@ -389,7 +407,6 @@ MovementTab:CreateButton({
     Name = "Tốc độ bay: 50",
     Callback = function()
         FlySpeed = (FlySpeed >= 250) and 50 or (FlySpeed + 50)
-        -- Cập nhật text nút (Rayfield không hỗ trợ Set trực tiếp, ta dùng lại biến)
     end
 })
 MovementTab:CreateToggle({
@@ -469,9 +486,9 @@ VisualTab:CreateButton({
 })
 
 -- ==================== TAB CÀI ĐẶT ====================
-SettingsTab:CreateSection("Giao diện & Hệ thống")
+SettingsTab:CreateSection("Hiệu năng & Hệ thống")
 SettingsTab:CreateToggle({
-    Name = "Tăng FPS (dọn map)",
+    Name = "Tăng FPS (Low Graphics)",
     CurrentValue = FPSToggleState,
     Flag = "FPSBoost",
     Callback = function(v)
@@ -484,12 +501,6 @@ SettingsTab:CreateToggle({
     CurrentValue = ShowStatsPanel,
     Flag = "StatsPanel",
     Callback = function(v) ShowStatsPanel = v end
-})
-SettingsTab:CreateToggle({
-    Name = "Nền menu xanh mờ",
-    CurrentValue = BlueBackgroundEnabled,
-    Flag = "BlueBg",
-    Callback = function(v) BlueBackgroundEnabled = v end
 })
 
 -- ==================== VÒNG LẶP CHÍNH ====================
