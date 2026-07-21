@@ -1,155 +1,252 @@
--- Tải thư viện Dương Quỳnh Anh (Rayfield đã đổi tên)
+-- Tải thư viện Dương Quỳnh Anh (Rayfield)
 local Rayfield = loadstring(game:HttpGet("https://raw.githubusercontent.com/dn-l24/D-ng-Qu-nh-Anh/refs/heads/main/D%C6%B0%C6%A1ng%20Qu%E1%BB%B3nh%20Anh"))()
 
--- Vá loading screen để hiển thị Dương Quỳnh Anh ngay từ đầu
+-- Vá loading screen
 local CoreGui = game:GetService("CoreGui")
 local RayfieldGui = CoreGui:FindFirstChild("Rayfield") or CoreGui:WaitForChild("Rayfield", 5)
 if RayfieldGui then
-    local LoadingFrame = RayfieldGui:FindFirstChild("Loading") or RayfieldGui.Main:FindFirstChild("LoadingFrame")
+    local LoadingFrame = RayfieldGui:FindFirstChild("Loading") or (RayfieldGui:FindFirstChild("Main") and RayfieldGui.Main:FindFirstChild("LoadingFrame"))
     if LoadingFrame then
-        LoadingFrame.Title.Text = "Dương Quỳnh Anh"
-        LoadingFrame.Subtitle.Text = "Đang tải..."
-        LoadingFrame.Version.Text = "Dương Quỳnh Anh UI"
-        LoadingFrame.Banner.Image = "rbxassetid://125945223244416"
+        if LoadingFrame:FindFirstChild("Title") then LoadingFrame.Title.Text = "Dương Quỳnh Anh" end
+        if LoadingFrame:FindFirstChild("Subtitle") then LoadingFrame.Subtitle.Text = "Đang tải..." end
+        if LoadingFrame:FindFirstChild("Version") then LoadingFrame.Version.Text = "Dương Quỳnh Anh UI" end
+        if LoadingFrame:FindFirstChild("Banner") then LoadingFrame.Banner.Image = "rbxassetid://125945223244416" end
     end
 end
 
--- ==================== DỊCH VỤ VÀ BIẾN HỆ THỐNG ====================
+-- ==============================================================================
+-- [1] SERVICES & CONSTANTS (CACHED)
+-- ==============================================================================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
+
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+local Camera = Workspace.CurrentCamera
 
--- Cấu hình
-local AimbotEnabled = true
-local ESPEnabled = true
-local MenuVisible = true
-local FPSToggleState = false
-local FlyEnabled = false
-local FlySpeed = 50
-local SpinEnabled = false
-local NoclipEnabled = false
-local WalkSpeedEnabled = false
-local CustomWalkSpeed = 100
-local InfiniteJumpEnabled = false
-local KillAuraEnabled = false
-local ShowStatsPanel = false
+local V2 = Vector2.new
+local V3 = Vector3.new
+local CF = CFrame.new
+local CFA = CFrame.Angles
+local Color = Color3.fromRGB
+local Rad = math.rad
+local Huge = math.huge
+local Insert = table.insert
+local Clear = table.clear
+local Sort = table.sort
 
-local OriginalToolData = {}
-local KillAuraConnection = nil
-local GIANT_SIZE = Vector3.new(2000, 2000, 2000)
+local TARGET_PART_NAME = "Head"
+local ROOT_PART_NAME = "HumanoidRootPart"
+local HUM_NAME = "Humanoid"
+local GIANT_SIZE = V3(2000, 2000, 2000)
+local GIANT_GRIP = CF(0, 0, -1010)
+local ZERO_VEC3 = V3(0, 0, 0)
+local MAX_FORCE = V3(Huge, Huge, Huge)
+local SPIN_ANGLE = CFA(0, Rad(25), 0)
 
-local FOV_RADIUS = 35
-local MAX_LINE_DISTANCE = 200
-local TARGET_PART = "Head"
-
--- Màu sắc
-local FOVColor = Color3.fromRGB(173, 216, 230)
-local ESPColor = Color3.fromRGB(0, 162, 255)
-local TracerColor = Color3.fromRGB(255, 255, 0)
+-- ==============================================================================
+-- [2] STATE & CONFIGURATION
+-- ==============================================================================
+local State = {
+    Aimbot = true,
+    ESP = true,
+    Fly = false,
+    FlySpeed = 50,
+    Spin = false,
+    Noclip = false,
+    WalkSpeed = false,
+    CustomWalkSpeed = 100,
+    InfiniteJump = false,
+    KillAura = false,
+    FOVRadius = 35,
+    MaxTracerDist = 200,
+    
+    FOVColor = Color(173, 216, 230),
+    ESPColor = Color(0, 162, 255),
+    TracerColor = Color(255, 255, 0),
+    
+    LocalChar = nil,
+    LocalRoot = nil,
+    LocalHum = nil,
+    LocalParts = {},
+    
+    FlyVelocity = nil,
+    FlyGyro = nil,
+    
+    KillAuraTool = nil,
+    OriginalToolData = {}
+}
 
 local ColorPresets = {
-    {Name = "Cyan", Color = Color3.fromRGB(0, 162, 255)},
-    {Name = "Red", Color = Color3.fromRGB(255, 0, 0)},
-    {Name = "Green", Color = Color3.fromRGB(0, 255, 0)},
-    {Name = "Yellow", Color = Color3.fromRGB(255, 255, 0)},
-    {Name = "Purple", Color = Color3.fromRGB(170, 0, 255)},
-    {Name = "White", Color = Color3.fromRGB(255, 255, 255)}
+    {Name = "Cyan", Color = Color(0, 162, 255)},
+    {Name = "Red", Color = Color(255, 0, 0)},
+    {Name = "Green", Color = Color(0, 255, 0)},
+    {Name = "Yellow", Color = Color(255, 255, 0)},
+    {Name = "Purple", Color = Color(170, 0, 255)},
+    {Name = "White", Color = Color(255, 255, 255)}
 }
-local currentFOVColorIndex = 1
-local currentESPColorIndex = 1
-local currentTracerColorIndex = 4
+local FOVColorIdx, ESPColorIdx, TracerColorIdx = 1, 1, 4
 
--- ==================== DRAWING API ====================
+-- ==============================================================================
+-- [3] PLAYER CACHE SYSTEM (ZERO FIND-FIRST-CHILD IN RENDERSTEPPED)
+-- ==============================================================================
+local PlayerCache = {}
+local Connections = {}
+
+local function ApplyESP(player, cacheData)
+    if player == LocalPlayer or not cacheData.Char then return end
+    if not cacheData.Highlight then
+        local hl = Instance.new("Highlight")
+        hl.Name = "ESPHighlight"
+        hl.FillTransparency = 0.5
+        hl.OutlineTransparency = 0
+        hl.OutlineColor = Color(255, 255, 255)
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Parent = cacheData.Char
+        cacheData.Highlight = hl
+    end
+    cacheData.Highlight.FillColor = State.ESPColor
+    cacheData.Highlight.Enabled = State.ESP
+end
+
+local function RemoveESP(cacheData)
+    if cacheData and cacheData.Highlight then
+        cacheData.Highlight:Destroy()
+        cacheData.Highlight = nil
+    end
+end
+
+local function UpdateAllESP()
+    for player, data in pairs(PlayerCache) do
+        if State.ESP then ApplyESP(player, data) else RemoveESP(data) end
+    end
+end
+
+local function UpdateCharacterCache(player, char)
+    if player == LocalPlayer then
+        State.LocalChar = char
+        State.LocalRoot = char:WaitForChild(ROOT_PART_NAME, 3)
+        State.LocalHum = char:WaitForChild(HUM_NAME, 3)
+        Clear(State.LocalParts)
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then Insert(State.LocalParts, part) end
+        end
+        return
+    end
+
+    task.spawn(function()
+        local root = char:WaitForChild(ROOT_PART_NAME, 3)
+        local target = char:WaitForChild(TARGET_PART_NAME, 3)
+        local hum = char:WaitForChild(HUM_NAME, 3)
+        
+        if root and target and hum then
+            if not PlayerCache[player] then PlayerCache[player] = {} end
+            local data = PlayerCache[player]
+            data.Char = char
+            data.Root = root
+            data.Target = target
+            data.Hum = hum
+            data.IsAlive = (hum.Health > 0)
+            
+            if Connections[player.Name .. "_Died"] then Connections[player.Name .. "_Died"]:Disconnect() end
+            Connections[player.Name .. "_Died"] = hum.Died:Connect(function() data.IsAlive = false end)
+            
+            if State.ESP then ApplyESP(player, data) end
+        end
+    end)
+end
+
+local function AddPlayer(player)
+    if player ~= LocalPlayer then
+        PlayerCache[player] = { IsAlive = false, Char = nil, Root = nil, Target = nil, Hum = nil, Highlight = nil }
+    end
+    Connections[player.Name .. "_Added"] = player.CharacterAdded:Connect(function(char) UpdateCharacterCache(player, char) end)
+    Connections[player.Name .. "_Removing"] = player.CharacterRemoving:Connect(function()
+        if player == LocalPlayer then
+            State.LocalChar = nil; State.LocalRoot = nil; State.LocalHum = nil
+        elseif PlayerCache[player] then
+            PlayerCache[player].IsAlive = false
+            RemoveESP(PlayerCache[player])
+        end
+    end)
+    if player.Character then UpdateCharacterCache(player, player.Character) end
+end
+
+local function RemovePlayer(player)
+    if PlayerCache[player] then RemoveESP(PlayerCache[player]) end
+    PlayerCache[player] = nil
+    for k, v in pairs(Connections) do
+        if string.sub(k, 1, #player.Name) == player.Name then v:Disconnect(); Connections[k] = nil end
+    end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do AddPlayer(p) end
+Connections["PlayerAdded"] = Players.PlayerAdded:Connect(AddPlayer)
+Connections["PlayerRemoving"] = Players.PlayerRemoving:Connect(RemovePlayer)
+
+-- ==============================================================================
+-- [4] RAYCAST & DRAWING API
+-- ==============================================================================
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Exclude
+local IgnoreList = {nil, nil, Camera}
+
+local function IsVisible(targetChar, targetPos)
+    if not State.LocalChar or not targetChar then return false end
+    IgnoreList[1] = State.LocalChar
+    IgnoreList[2] = targetChar
+    RayParams.FilterDescendantsInstances = IgnoreList
+    local origin = Camera.CFrame.Position
+    return Workspace:Raycast(origin, targetPos - origin, RayParams) == nil
+end
+
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 1.5
-FOVCircle.Color = FOVColor
 FOVCircle.Filled = false
-FOVCircle.Radius = FOV_RADIUS
-FOVCircle.Visible = AimbotEnabled
+FOVCircle.Color = State.FOVColor
+FOVCircle.Visible = false
 
 local TracerLines = {}
 for i = 1, 3 do
     local line = Drawing.new("Line")
     line.Thickness = 1.5
-    line.Color = TracerColor
+    line.Color = State.TracerColor
     line.Transparency = 1
     line.Visible = false
-    table.insert(TracerLines, line)
+    TracerLines[i] = line
 end
 
-local function updateAllTracerColors()
-    for _, line in ipairs(TracerLines) do
-        line.Color = TracerColor
-    end
+local function UpdateTracerColors()
+    for i = 1, 3 do TracerLines[i].Color = State.TracerColor end
 end
 
--- ==================== ESP ====================
-local function applyESP(player)
-    if player == LocalPlayer or not player.Character then return end
-    local highlight = player.Character:FindFirstChild("ESPHighlight")
-    if not highlight then
-        highlight = Instance.new("Highlight")
-        highlight.Name = "ESPHighlight"
-        highlight.FillTransparency = 0.5
-        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-        highlight.OutlineTransparency = 0
-        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        highlight.Parent = player.Character
-    end
-    highlight.FillColor = ESPColor
-    highlight.Enabled = ESPEnabled
+-- ==============================================================================
+-- [5] FPS BOOSTER MODULE
+-- ==============================================================================
+local function IsImportant(name)
+    name = string.lower(name)
+    return string.find(name, "baseplate") or string.find(name, "spawnlocation") or string.find(name, "floor") or string.find(name, "ground") or string.find(name, "sàn") or string.find(name, "checkpoint") or string.find(name, "teleport")
 end
 
-local function removeESP(player)
-    if player.Character then
-        local highlight = player.Character:FindFirstChild("ESPHighlight")
-        if highlight then highlight:Destroy() end
-    end
-end
-
-local function updateAllESP()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if ESPEnabled then applyESP(player) else removeESP(player) end
-    end
-end
-
--- ==================== FPS BOOSTER NÂNG CẤP ====================
--- Bộ lọc các đối tượng quan trọng không nên bị xóa
-local function IsImportant(instance)
-    local name = string.lower(instance.Name)
-    local protectedNames = {"baseplate", "spawnlocation", "floor", "ground", "sàn", "checkpoint", "teleport"}
-    for _, protected in ipairs(protectedNames) do
-        if string.find(name, protected) then return true end
-    end
-    return false
-end
-
--- Tối ưu hóa vật liệu và thuộc tính của Part để giảm tải GPU
 local function SmartOptimize(instance)
     if instance:IsA("BasePart") or instance:IsA("MeshPart") then
-        -- Giảm chất lượng vật liệu và tắt bóng đổ
         instance.Material = Enum.Material.SmoothPlastic
         instance.CastShadow = false
         instance.Reflectance = 0
-        if instance:IsA("MeshPart") and not IsImportant(instance) then
-            instance.TextureID = "" -- Xóa texture không cần thiết
-        end
+        if instance:IsA("MeshPart") and not IsImportant(instance.Name) then instance.TextureID = "" end
     elseif instance:IsA("ParticleEmitter") or instance:IsA("Smoke") or instance:IsA("Fire") or instance:IsA("Sparkles") or instance:IsA("Trail") or instance:IsA("Beam") then
-        -- Xóa hiệu ứng hạt để giảm CPU
         instance:Destroy()
     elseif instance:IsA("Decal") or instance:IsA("Texture") then
-        if instance.Parent and not IsImportant(instance.Parent) then
-            instance:Destroy()
-        end
+        if instance.Parent and not IsImportant(instance.Parent.Name) then instance:Destroy() end
     end
 end
 
--- Chế độ đồ họa thấp: tắt các hiệu ứng ánh sáng nặng
-local function EnableLowGraphics()
+local function ExecuteFPSBooster()
+    if _G.SmartFPSBoosterExecuted then return end
+    _G.SmartFPSBoosterExecuted = true
+
     Lighting.GlobalShadows = false
     Lighting.Brightness = 1
     Lighting.ClockTime = 12
@@ -158,414 +255,170 @@ local function EnableLowGraphics()
             effect:Destroy()
         end
     end
-end
 
--- Quét và tối ưu map theo từng phần, tránh giật lag khi khởi tạo
-local function ExecuteSmartFPSBooster()
-    if _G.SmartFPSBoosterExecuted then return end
-    _G.SmartFPSBoosterExecuted = true
-
-    EnableLowGraphics()
-
-    -- Tối ưu dần các đối tượng hiện có, mỗi lần xử lý một phần để không gây đứng hình
-    local descendants = Workspace:GetDescendants()
-    local index = 1
-    local batchSize = 100
-
-    local function processBatch()
-        for _ = 1, batchSize do
-            if index > #descendants then
-                -- Đã xong, tiếp tục lắng nghe đối tượng mới
-                Workspace.DescendantAdded:Connect(function(descendant)
-                    if LocalPlayer.Character and descendant:IsDescendantOf(LocalPlayer.Character) then return end
-                    SmartOptimize(descendant)
-                end)
-                return
-            end
-            local descendant = descendants[index]
-            if not descendant:IsDescendantOf(LocalPlayer.Character or workspace) then
+    task.spawn(function()
+        local count = 0
+        for _, descendant in ipairs(Workspace:GetDescendants()) do
+            if not (State.LocalChar and descendant:IsDescendantOf(State.LocalChar)) and not descendant:IsDescendantOf(Camera) then
                 SmartOptimize(descendant)
+                count = count + 1
+                if count >= 300 then count = 0; RunService.Heartbeat:Wait() end
             end
-            index = index + 1
-        end
-        -- Tiếp tục xử lý batch tiếp theo vào frame sau
-        RunService.Heartbeat:Wait()
-        processBatch()
-    end
-
-    task.spawn(processBatch)
-end
-
--- ==================== FLY, NOCLIP, JUMP, SPIN ====================
-local flyConnection, bodyVelocity, bodyGyro
-
-local function StartFly()
-    if flyConnection then flyConnection:Disconnect() end
-    local character = LocalPlayer.Character
-    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if not rootPart or not humanoid then return end
-
-    bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.Name = "FlyVelocity"
-    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bodyVelocity.Parent = rootPart
-
-    bodyGyro = Instance.new("BodyGyro")
-    bodyGyro.Name = "FlyGyro"
-    bodyGyro.CFrame = rootPart.CFrame
-    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    bodyGyro.P = 9000
-    bodyGyro.Parent = rootPart
-    humanoid.PlatformStand = true
-
-    flyConnection = RunService.RenderStepped:Connect(function()
-        if not FlyEnabled or not rootPart or not character.Parent then
-            if flyConnection then flyConnection:Disconnect() flyConnection = nil end
-            return
-        end
-        bodyGyro.CFrame = Camera.CFrame
-        local walkDir = humanoid.MoveDirection
-
-        if walkDir.Magnitude > 0 then
-            local camFrame = Camera.CFrame
-            local flightVector = (camFrame.LookVector * walkDir:Dot(Vector3.new(camFrame.LookVector.X, 0, camFrame.LookVector.Z).Unit) + camFrame.RightVector * walkDir:Dot(Vector3.new(camFrame.RightVector.X, 0, camFrame.RightVector.Z).Unit))
-            bodyVelocity.Velocity = flightVector.Magnitude > 0 and (flightVector.Unit * FlySpeed) or Vector3.new(0, 0, 0)
-        else
-            bodyVelocity.Velocity = Vector3.new(0, 0, 0)
         end
     end)
+
+    Connections["WorkspaceDescendant"] = Workspace.DescendantAdded:Connect(function(desc)
+        if State.LocalChar and desc:IsDescendantOf(State.LocalChar) then return end
+        SmartOptimize(desc)
+    end)
+end
+
+-- ==============================================================================
+-- [6] MOVEMENT MODULE (FLY)
+-- ==============================================================================
+local function StartFly()
+    if State.FlyVelocity then State.FlyVelocity:Destroy() end
+    if State.FlyGyro then State.FlyGyro:Destroy() end
+    if not State.LocalRoot or not State.LocalHum then return end
+
+    local bv = Instance.new("BodyVelocity")
+    bv.Name = "FlyVelocity"
+    bv.Velocity = ZERO_VEC3
+    bv.MaxForce = MAX_FORCE
+    bv.Parent = State.LocalRoot
+    State.FlyVelocity = bv
+
+    local bg = Instance.new("BodyGyro")
+    bg.Name = "FlyGyro"
+    bg.CFrame = State.LocalRoot.CFrame
+    bg.MaxTorque = MAX_FORCE
+    bg.P = 9000
+    bg.Parent = State.LocalRoot
+    State.FlyGyro = bg
+
+    State.LocalHum.PlatformStand = true
 end
 
 local function StopFly()
-    if flyConnection then flyConnection:Disconnect() flyConnection = nil end
-    local character = LocalPlayer.Character
-    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-
-    if rootPart then
-        local fV = rootPart:FindFirstChild("FlyVelocity")
-        local fG = rootPart:FindFirstChild("FlyGyro")
+    if State.FlyVelocity then State.FlyVelocity:Destroy(); State.FlyVelocity = nil end
+    if State.FlyGyro then State.FlyGyro:Destroy(); State.FlyGyro = nil end
+    if State.LocalHum then State.LocalHum.PlatformStand = false end
+    if State.LocalRoot then
+        local fV = State.LocalRoot:FindFirstChild("FlyVelocity")
+        local fG = State.LocalRoot:FindFirstChild("FlyGyro")
         if fV then fV:Destroy() end
         if fG then fG:Destroy() end
     end
-    if humanoid then humanoid.PlatformStand = false end
 end
 
-LocalPlayer.CharacterAdded:Connect(function(char)
-    if FlyEnabled then
-        task.wait(1)
-        StartFly()
-    end
-end)
-
-RunService.Stepped:Connect(function()
-    if NoclipEnabled and LocalPlayer.Character then
-        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
-            if part:IsA("BasePart") then part.CanCollide = false end
-        end
-    end
-end)
-
-UserInputService.JumpRequest:Connect(function()
-    if InfiniteJumpEnabled and LocalPlayer.Character then
-        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.Jumping) end
-    end
-end)
-
-task.spawn(function()
-    RunService.Heartbeat:Connect(function()
-        if SpinEnabled and not FlyEnabled then
-            local character = LocalPlayer.Character
-            local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-            if rootPart then rootPart.CFrame = rootPart.CFrame * CFrame.Angles(0, math.rad(25), 0) end
-        end
-    end)
-end)
-
--- ==================== KILL AURA ====================
-local function resetSwordSize(tool)
-    if tool and tool:FindFirstChild("Handle") and OriginalToolData[tool] then
+-- ==============================================================================
+-- [7] KILL AURA MODULE
+-- ==============================================================================
+local function ResetSwordSize(tool)
+    if tool and State.OriginalToolData[tool] and tool:FindFirstChild("Handle") then
         local handle = tool.Handle
-        handle.Size = OriginalToolData[tool].Size
-        tool.Grip = OriginalToolData[tool].Grip
+        handle.Size = State.OriginalToolData[tool].Size
+        tool.Grip = State.OriginalToolData[tool].Grip
         handle.Massless = false
         handle.CanCollide = true
-        OriginalToolData[tool] = nil
+        State.OriginalToolData[tool] = nil
     end
 end
 
-local function stopKillAuraLogic()
-    if KillAuraConnection then KillAuraConnection:Disconnect() KillAuraConnection = nil end
-    for tool, _ in pairs(OriginalToolData) do resetSwordSize(tool) end
-    OriginalToolData = {}
-end
+local function ManageKillAura()
+    if not State.KillAura or not State.LocalChar then return end
+    
+    local tool = State.LocalChar:FindFirstChildOfClass("Tool")
+    if tool and tool:FindFirstChild("Handle") then
+        local handle = tool.Handle
+        if not State.OriginalToolData[tool] then
+            State.OriginalToolData[tool] = { Size = handle.Size, Grip = tool.Grip }
+        end
+        handle.Size = GIANT_SIZE
+        handle.Massless = true
+        handle.CanCollide = false
+        tool.Grip = GIANT_GRIP
+        tool:Activate()
 
-local function startKillAuraLogic()
-    if KillAuraConnection then return end
-    KillAuraConnection = RunService.Heartbeat:Connect(function()
-        if not KillAuraEnabled then return end
-        local char = LocalPlayer.Character
-        if not char then return end
-
-        local equippedTool = char:FindFirstChildOfClass("Tool")
-        if equippedTool and equippedTool:FindFirstChild("Handle") then
-            local handle = equippedTool.Handle
-            if not OriginalToolData[equippedTool] then
-                OriginalToolData[equippedTool] = { Size = handle.Size, Grip = equippedTool.Grip }
-            end
-
-            handle.Size = GIANT_SIZE
-            handle.Massless = true
-            handle.CanCollide = false
-            equippedTool.Grip = CFrame.new(0, 0, -(GIANT_SIZE.Z / 2) - 10)
-            equippedTool:Activate()
-
-            if firetouchinterest then
-                for _, player in ipairs(Players:GetPlayers()) do
-                    if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                        firetouchinterest(handle, player.Character.HumanoidRootPart, 0)
-                        firetouchinterest(handle, player.Character.HumanoidRootPart, 1)
-                    end
+        if firetouchinterest then
+            for player, data in pairs(PlayerCache) do
+                if data.IsAlive and data.Root then
+                    firetouchinterest(handle, data.Root, 0)
+                    firetouchinterest(handle, data.Root, 1)
                 end
             end
         end
-
-        local backpack = LocalPlayer:FindFirstChild("Backpack")
-        if backpack then
-            for _, item in ipairs(backpack:GetChildren()) do
-                if item:IsA("Tool") and OriginalToolData[item] then resetSwordSize(item) end
-            end
-        end
-    end)
-end
-
--- ==================== RAYCAST ====================
-local RaycastCache = RaycastParams.new()
-RaycastCache.FilterType = Enum.RaycastFilterType.Exclude
-
-local function isVisible(targetCharacter, targetPart)
-    if not LocalPlayer.Character or not targetCharacter then return false end
-    RaycastCache.FilterDescendantsInstances = {LocalPlayer.Character, targetCharacter, Camera}
-    local origin = Camera.CFrame.Position
-    local direction = targetPart.Position - origin
-    return workspace:Raycast(origin, direction, RaycastCache) == nil
-end
-
--- ==================== GIAO DIỆN CHÍNH (RAYFIELD) ====================
-local Window = Rayfield:CreateWindow({
-    Name = "Dương Quỳnh Anh",
-    LoadingTitle = "Dương Quỳnh Anh",
-    LoadingSubtitle = "Aimbot & More",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "DuongQuynhAnhConfig",
-        FileName = "Settings"
-    },
-    Discord = { Enabled = false },
-    KeySystem = false
-})
-
--- Tabs
-local CombatTab = Window:CreateTab("Chiến đấu", 4483362458)
-local MovementTab = Window:CreateTab("Di chuyển", 4483362458)
-local VisualTab = Window:CreateTab("Hiển thị", 4483362458)
-local SettingsTab = Window:CreateTab("Cài đặt", 4483362458)
-
--- ==================== TAB CHIẾN ĐẤU ====================
-CombatTab:CreateSection("Aimbot & Kill Aura")
-CombatTab:CreateToggle({
-    Name = "Aimbot",
-    CurrentValue = AimbotEnabled,
-    Flag = "Aimbot",
-    Callback = function(v) AimbotEnabled = v end
-})
-CombatTab:CreateToggle({
-    Name = "Kill Aura",
-    CurrentValue = false,
-    Flag = "KillAura",
-    Callback = function(v)
-        KillAuraEnabled = v
-        if v then startKillAuraLogic() else stopKillAuraLogic() end
     end
-})
 
--- ==================== TAB DI CHUYỂN ====================
-MovementTab:CreateSection("Bay & Tốc độ")
-MovementTab:CreateToggle({
-    Name = "Bay (Fly)",
-    CurrentValue = FlyEnabled,
-    Flag = "Fly",
-    Callback = function(v)
-        FlyEnabled = v
-        if v then StartFly() else StopFly() end
-    end
-})
-MovementTab:CreateButton({
-    Name = "Tốc độ bay: 50",
-    Callback = function()
-        FlySpeed = (FlySpeed >= 250) and 50 or (FlySpeed + 50)
-    end
-})
-MovementTab:CreateToggle({
-    Name = "Đi xuyên tường",
-    CurrentValue = NoclipEnabled,
-    Flag = "Noclip",
-    Callback = function(v) NoclipEnabled = v end
-})
-MovementTab:CreateToggle({
-    Name = "Tăng tốc chạy",
-    CurrentValue = WalkSpeedEnabled,
-    Flag = "WalkSpeed",
-    Callback = function(v)
-        WalkSpeedEnabled = v
-        if not v and LocalPlayer.Character then
-            local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid then humanoid.WalkSpeed = 16 end
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, item in ipairs(bp:GetChildren()) do
+            if item:IsA("Tool") and State.OriginalToolData[item] then ResetSwordSize(item) end
         end
     end
-})
-MovementTab:CreateToggle({
-    Name = "Nhảy vô hạn",
-    CurrentValue = InfiniteJumpEnabled,
-    Flag = "InfJump",
-    Callback = function(v) InfiniteJumpEnabled = v end
-})
-MovementTab:CreateToggle({
-    Name = "Tự quay (Spin)",
-    CurrentValue = SpinEnabled,
-    Flag = "Spin",
-    Callback = function(v) SpinEnabled = v end
-})
+end
 
--- ==================== TAB HIỂN THỊ ====================
-VisualTab:CreateSection("ESP & Tracers")
-VisualTab:CreateToggle({
-    Name = "ESP Xuyên tường",
-    CurrentValue = ESPEnabled,
-    Flag = "ESP",
-    Callback = function(v)
-        ESPEnabled = v
-        updateAllESP()
-    end
-})
-VisualTab:CreateButton({
-    Name = "Màu ESP: Cyan",
-    Callback = function()
-        currentESPColorIndex = (currentESPColorIndex % #ColorPresets) + 1
-        ESPColor = ColorPresets[currentESPColorIndex].Color
-        if ESPEnabled then updateAllESP() end
-    end
-})
-VisualTab:CreateButton({
-    Name = "Màu đường kẻ: Yellow",
-    Callback = function()
-        currentTracerColorIndex = (currentTracerColorIndex % #ColorPresets) + 1
-        TracerColor = ColorPresets[currentTracerColorIndex].Color
-        updateAllTracerColors()
-    end
-})
-VisualTab:CreateSection("FOV & Radar")
-VisualTab:CreateSlider({
-    Name = "Bán kính FOV",
-    Range = {10, 300},
-    Increment = 10,
-    Suffix = "studs",
-    CurrentValue = FOV_RADIUS,
-    Flag = "FOVRadius",
-    Callback = function(v) FOV_RADIUS = v end
-})
-VisualTab:CreateButton({
-    Name = "Màu vòng FOV: Cyan",
-    Callback = function()
-        currentFOVColorIndex = (currentFOVColorIndex % #ColorPresets) + 1
-        FOVColor = ColorPresets[currentFOVColorIndex].Color
-    end
-})
+-- ==============================================================================
+-- [8] MAIN LOOPS (BATCHED PROCESSING)
+-- ==============================================================================
+local TracerCandidates = {}
 
--- ==================== TAB CÀI ĐẶT ====================
-SettingsTab:CreateSection("Hiệu năng & Hệ thống")
-SettingsTab:CreateToggle({
-    Name = "Tăng FPS (Low Graphics)",
-    CurrentValue = FPSToggleState,
-    Flag = "FPSBoost",
-    Callback = function(v)
-        FPSToggleState = v
-        if v then ExecuteSmartFPSBooster() end
-    end
-})
-SettingsTab:CreateToggle({
-    Name = "Hiển thị FPS/Ping",
-    CurrentValue = ShowStatsPanel,
-    Flag = "StatsPanel",
-    Callback = function(v) ShowStatsPanel = v end
-})
-
--- ==================== VÒNG LẶP CHÍNH ====================
 RunService.RenderStepped:Connect(function()
-    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local camSize = Camera.ViewportSize
+    local screenCenter = V2(camSize.X * 0.5, camSize.Y * 0.5)
 
     FOVCircle.Position = screenCenter
-    FOVCircle.Radius = FOV_RADIUS
-    FOVCircle.Color = FOVColor
-    FOVCircle.Visible = AimbotEnabled
+    FOVCircle.Radius = State.FOVRadius
+    FOVCircle.Color = State.FOVColor
+    FOVCircle.Visible = State.Aimbot
 
-    local localCharacter = LocalPlayer.Character
-    local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+    local closestPlayer = nil
+    local shortestDist = State.FOVRadius
+    local localPos = State.LocalRoot and State.LocalRoot.Position
+    Clear(TracerCandidates)
 
-    local closestAimbotPlayer = nil
-    local shortestDistance = math.huge
-    local tracerCandidates = {}
-
-    if AimbotEnabled or ESPEnabled then
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player == LocalPlayer or not player.Character then continue end
-            local char = player.Character
-            local targetPart = char:FindFirstChild(TARGET_PART)
-            local root = char:FindFirstChild("HumanoidRootPart")
-            local hum = char:FindFirstChildOfClass("Humanoid")
-
-            if hum and hum.Health > 0 and targetPart and root and char.Parent == Workspace then
-                if AimbotEnabled then
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+    if State.Aimbot or State.ESP then
+        for player, data in pairs(PlayerCache) do
+            if data.IsAlive and data.Target and data.Char.Parent == Workspace then
+                local targetPos = data.Target.Position
+                
+                if State.Aimbot then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPos)
                     if onScreen then
-                        local distanceToCenter = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-                        if distanceToCenter <= FOV_RADIUS and distanceToCenter < shortestDistance and isVisible(char, targetPart) then
-                            closestAimbotPlayer = player
-                            shortestDistance = distanceToCenter
+                        local dist = (V2(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                        if dist < shortestDist and IsVisible(data.Char, targetPos) then
+                            closestPlayer = data
+                            shortestDist = dist
                         end
                     end
                 end
 
-                if ESPEnabled and localRoot then
-                    local distance = (root.Position - localRoot.Position).Magnitude
-                    if distance <= MAX_LINE_DISTANCE then
-                        table.insert(tracerCandidates, {Player = player, Distance = distance, TargetPart = targetPart})
+                if State.ESP and localPos and data.Root then
+                    local worldDist = (data.Root.Position - localPos).Magnitude
+                    if worldDist <= State.MaxTracerDist then
+                        Insert(TracerCandidates, {Dist = worldDist, Pos = targetPos})
                     end
                 end
             end
         end
     end
 
-    if AimbotEnabled and closestAimbotPlayer then
-        local targetPos = closestAimbotPlayer.Character[TARGET_PART].Position
-        Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, targetPos)
+    if State.Aimbot and closestPlayer then
+        Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, closestPlayer.Target.Position)
     end
 
-    if ESPEnabled then
-        if #tracerCandidates > 1 then
-            table.sort(tracerCandidates, function(a, b) return a.Distance < b.Distance end)
+    if State.ESP then
+        if #TracerCandidates > 1 then
+            Sort(TracerCandidates, function(a, b) return a.Dist < b.Dist end)
         end
         for i = 1, 3 do
             local line = TracerLines[i]
-            local candidate = tracerCandidates[i]
-            if candidate then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(candidate.TargetPart.Position)
+            local cand = TracerCandidates[i]
+            if cand then
+                local sPos, onScreen = Camera:WorldToViewportPoint(cand.Pos)
                 if onScreen then
                     line.From = screenCenter
-                    line.To = Vector2.new(screenPos.X, screenPos.Y)
+                    line.To = V2(sPos.X, sPos.Y)
                     line.Visible = true
                 else
                     line.Visible = false
@@ -578,28 +431,150 @@ RunService.RenderStepped:Connect(function()
         for i = 1, 3 do TracerLines[i].Visible = false end
     end
 
-    if WalkSpeedEnabled and localCharacter then
-        local humanoid = localCharacter:FindFirstChildOfClass("Humanoid")
-        if humanoid then humanoid.WalkSpeed = CustomWalkSpeed end
+    if State.Fly and State.FlyVelocity and State.FlyGyro and State.LocalHum and State.LocalRoot then
+        State.FlyGyro.CFrame = Camera.CFrame
+        local walkDir = State.LocalHum.MoveDirection
+        if walkDir.Magnitude > 0 then
+            local camCFrame = Camera.CFrame
+            local rx, rz = camCFrame.RightVector.X, camCFrame.RightVector.Z
+            local lx, lz = camCFrame.LookVector.X, camCFrame.LookVector.Z
+            local dotLook = walkDir:Dot(V3(lx, 0, lz).Unit)
+            local dotRight = walkDir:Dot(V3(rx, 0, rz).Unit)
+            local fVec = (camCFrame.LookVector * dotLook) + (camCFrame.RightVector * dotRight)
+            State.FlyVelocity.Velocity = fVec.Magnitude > 0 and (fVec.Unit * State.FlySpeed) or ZERO_VEC3
+        else
+            State.FlyVelocity.Velocity = ZERO_VEC3
+        end
     end
 end)
 
--- ==================== KẾT NỐI NGƯỜI CHƠI (ESP) ====================
-local function setupPlayerConnections(player)
-    player.CharacterAdded:Connect(function(character)
-        task.wait(0.5)
-        if ESPEnabled then applyESP(player) end
-    end)
-    if player.Character and ESPEnabled then applyESP(player) end
-end
+RunService.Stepped:Connect(function()
+    if State.Noclip and State.LocalChar then
+        local parts = State.LocalParts
+        for i = 1, #parts do parts[i].CanCollide = false end
+    end
+end)
 
-for _, player in ipairs(Players:GetPlayers()) do
-    setupPlayerConnections(player)
-end
-Players.PlayerAdded:Connect(setupPlayerConnections)
-Players.PlayerRemoving:Connect(removeESP)
+RunService.Heartbeat:Connect(function()
+    if State.Spin and not State.Fly and State.LocalRoot then
+        State.LocalRoot.CFrame = State.LocalRoot.CFrame * SPIN_ANGLE
+    end
+    ManageKillAura()
+    if State.WalkSpeed and State.LocalHum then
+        State.LocalHum.WalkSpeed = State.CustomWalkSpeed
+    end
+end)
 
--- ==================== KHỞI ĐỘNG CẤU HÌNH ====================
+UserInputService.JumpRequest:Connect(function()
+    if State.InfiniteJump and State.LocalHum then
+        State.LocalHum:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+-- ==============================================================================
+-- [9] GUI SETUP (RAYFIELD)
+-- ==============================================================================
+local Window = Rayfield:CreateWindow({
+    Name = "Dương Quỳnh Anh",
+    LoadingTitle = "Dương Quỳnh Anh",
+    LoadingSubtitle = "Aimbot & More",
+    ConfigurationSaving = { Enabled = true, FolderName = "DuongQuynhAnhConfig", FileName = "Settings" },
+    Discord = { Enabled = false },
+    KeySystem = false
+})
+
+local CombatTab = Window:CreateTab("Chiến đấu", 4483362458)
+CombatTab:CreateSection("Aimbot & Kill Aura")
+CombatTab:CreateToggle({
+    Name = "Aimbot", CurrentValue = State.Aimbot, Flag = "Aimbot",
+    Callback = function(v) State.Aimbot = v end
+})
+CombatTab:CreateToggle({
+    Name = "Kill Aura", CurrentValue = State.KillAura, Flag = "KillAura",
+    Callback = function(v) 
+        State.KillAura = v
+        if not v then
+            for tool, _ in pairs(State.OriginalToolData) do ResetSwordSize(tool) end
+            Clear(State.OriginalToolData)
+        end
+    end
+})
+
+local MovementTab = Window:CreateTab("Di chuyển", 4483362458)
+MovementTab:CreateSection("Bay & Tốc độ")
+MovementTab:CreateToggle({
+    Name = "Bay (Fly)", CurrentValue = State.Fly, Flag = "Fly",
+    Callback = function(v)
+        State.Fly = v
+        if v then StartFly() else StopFly() end
+    end
+})
+MovementTab:CreateButton({
+    Name = "Tốc độ bay (Chu kỳ +50)",
+    Callback = function()
+        State.FlySpeed = (State.FlySpeed >= 250) and 50 or (State.FlySpeed + 50)
+    end
+})
+MovementTab:CreateToggle({
+    Name = "Đi xuyên tường", CurrentValue = State.Noclip, Flag = "Noclip",
+    Callback = function(v) State.Noclip = v end
+})
+MovementTab:CreateToggle({
+    Name = "Tăng tốc chạy", CurrentValue = State.WalkSpeed, Flag = "WalkSpeed",
+    Callback = function(v)
+        State.WalkSpeed = v
+        if not v and State.LocalHum then State.LocalHum.WalkSpeed = 16 end
+    end
+})
+MovementTab:CreateToggle({
+    Name = "Nhảy vô hạn", CurrentValue = State.InfiniteJump, Flag = "InfJump",
+    Callback = function(v) State.InfiniteJump = v end
+})
+MovementTab:CreateToggle({
+    Name = "Tự quay (Spin)", CurrentValue = State.Spin, Flag = "Spin",
+    Callback = function(v) State.Spin = v end
+})
+
+local VisualTab = Window:CreateTab("Hiển thị", 4483362458)
+VisualTab:CreateSection("ESP & Tracers")
+VisualTab:CreateToggle({
+    Name = "ESP Xuyên tường", CurrentValue = State.ESP, Flag = "ESP",
+    Callback = function(v) State.ESP = v; UpdateAllESP() end
+})
+VisualTab:CreateButton({
+    Name = "Đổi Màu ESP",
+    Callback = function()
+        ESPColorIdx = (ESPColorIdx % #ColorPresets) + 1
+        State.ESPColor = ColorPresets[ESPColorIdx].Color
+        UpdateAllESP()
+    end
+})
+VisualTab:CreateButton({
+    Name = "Đổi Màu Đường kẻ",
+    Callback = function()
+        TracerColorIdx = (TracerColorIdx % #ColorPresets) + 1
+        State.TracerColor = ColorPresets[TracerColorIdx].Color
+        UpdateTracerColors()
+    end
+})
+VisualTab:CreateSection("FOV & Radar")
+VisualTab:CreateSlider({
+    Name = "Bán kính FOV", Range = {10, 300}, Increment = 10, Suffix = "studs", CurrentValue = State.FOVRadius, Flag = "FOVRadius",
+    Callback = function(v) State.FOVRadius = v end
+})
+VisualTab:CreateButton({
+    Name = "Đổi Màu Vòng FOV",
+    Callback = function()
+        FOVColorIdx = (FOVColorIdx % #ColorPresets) + 1
+        State.FOVColor = ColorPresets[FOVColorIdx].Color
+    end
+})
+
+local SettingsTab = Window:CreateTab("Cài đặt", 4483362458)
+SettingsTab:CreateSection("Giao diện & Hệ thống")
+SettingsTab:CreateToggle({
+    Name = "Tăng FPS (dọn map)", CurrentValue = false, Flag = "FPSBoost",
+    Callback = function(v) if v then ExecuteFPSBooster() end end
+})
+
 Rayfield:LoadConfiguration()
-
-print("Dương Quỳnh Anh - Full Hub đã sẵn sàng!")
